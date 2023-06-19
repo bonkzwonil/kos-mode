@@ -18,6 +18,9 @@
 
 (defvar *kos-available-cpus* nil)
 
+(defvar *kos-last-return* "") ;; artificial eval return, based on own prompt (via print), b/c kos has no prompt
+(defvar *kos-last-line* "")
+
 (defun kos-handler (process content)
 	;; TODO parse selection screen
   (when (string-match "^> " content)
@@ -36,6 +39,8 @@
 	  (push (cons num
 				  (list gui name cpu tag))
 			*kos-available-cpus*)))
+  (setq *kos-last-return* (format "%s%s" *kos-last-return* content))
+  (setq *kos-last-line* (string-trim content))
   (with-buffer *kos-repl*
 	(insert content)))
 
@@ -48,13 +53,36 @@
   (process-send-string *kos-terminal-stream* cmd)
   (process-send-string *kos-terminal-stream* "\n"))
 
-(defun kos-send-command (cmd)
+(defun* kos-wait-for (regex &optional (timeout 10))
+  (let ((i 0))
+	(loop until (or (string-match regex *kos-last-line*) (> i timeout)) do
+	  (incf i)
+	  (sleep-for 0 100))))
+
+
+(defun kos-choose-cpu (num)
+  (kos-send-string (format "%d" (setq *kos-current-cpu* num))))
+
+(defun kos-reset-last ()
+  (setq *kos-last-line* "")
+  (setq *kos-last-return* ""))
+
+
+
+(defun kos-send-command-cpu (cmd)
   (kos-send-string (format "%d" *kos-current-cpu*))
   (kos-wait-for-prompt)
+  (let ((ret (kos-send-command cmd)))
+	(kos-send-string (kbd "C-d"))
+	ret))
+
+(defun kos-send-command (cmd)
+  (kos-reset-last)
   (kos-send-string cmd)
-  (sleep-for 0 100)
-  (kos-send-string (kbd "C-d")))
-  
+  (kos-send-string "print \"EOO\".") ;;Special EndOfOut
+  (kos-wait-for "EOO" 100)
+  (replace-regexp-in-string "\nEOO\r\n" "" *kos-last-return*))
+
 
 (defun kos-get-last-command-at-point ()
   (save-excursion
@@ -88,8 +116,10 @@
 	(kos-send-command cmd)))
 
 
-(kos-send-command "print \"Hello\".")
-(kos-send-command "list.")
+(kos-choose-cpu 1)
+
+;;(kos-send-command "print \"Hello\".") --> "Hello"
+;;(kos-send-command "list.")
 
 
 
